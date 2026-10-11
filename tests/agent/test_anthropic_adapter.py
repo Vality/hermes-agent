@@ -1565,16 +1565,51 @@ class TestBuildAnthropicKwargs:
             assert _forbids_sampling_params(m) is False, m
 
     def test_non_claude_anthropic_models_use_manual_path(self):
-        """Non-Claude Anthropic-Messages models (minimax, qwen3, kimi) must not
-        be misclassified as adaptive by the default-to-modern rule."""
+        """Non-Claude Anthropic-Messages models (minimax M2.x, qwen3, kimi)
+        must not be misclassified as adaptive by the default-to-modern rule.
+
+        EXCEPTION: the MiniMax M3 family (M3, M3.1-Flash-Preview, M3.x future)
+        speaks the adaptive-thinking contract and IS expected to be classified
+        as adaptive. That case is covered by ``test_minimax_m3_uses_adaptive_path``.
+        """
         from agent.anthropic_adapter import (
             _supports_adaptive_thinking,
             _supports_xhigh_effort,
             _forbids_sampling_params,
         )
-        for m in ("minimax-m2", "qwen3-max", "moonshotai/kimi-k2.5", "glm-4.6"):
+        for m in ("minimax-m2.7", "qwen3-max", "moonshotai/kimi-k2.5", "glm-4.6"):
             assert _supports_adaptive_thinking(m) is False, m
             assert _supports_xhigh_effort(m) is False, m
+            assert _forbids_sampling_params(m) is False, m
+
+    def test_minimax_m3_uses_adaptive_path(self):
+        """MiniMax M3 family uses the Anthropic adaptive-thinking contract
+        (``thinking: {type: 'adaptive'}`` + ``output_config.effort``).
+
+        Per MiniMax's published docs, M3.1 REQUIRES adaptive mode — sending
+        ``type: 'enabled'`` or ``type: 'disabled'`` returns HTTP 400. So
+        routing M3/M3.1 down the manual path would break reasoning entirely.
+
+        M3.1 accepts the full effort level set (low/medium/high/xhigh/max),
+        so ``_supports_xhigh_effort`` must return True for it. Sampling
+        params are allowed (third-party endpoint, not a Claude 4.7-style
+        restrictive contract).
+        """
+        from agent.anthropic_adapter import (
+            _supports_adaptive_thinking,
+            _supports_xhigh_effort,
+            _forbids_sampling_params,
+        )
+        # M3.1 (current) + the bare M3 + a future M3.x variant — substring
+        # matching means date stamps / suffixes route the same way.
+        for m in (
+            "MiniMax-M3.1-Flash-Preview",
+            "MiniMax-M3",
+            "minimax-m3-20260101",
+            "MiniMax-M3.2",
+        ):
+            assert _supports_adaptive_thinking(m) is True, m
+            assert _supports_xhigh_effort(m) is True, m
             assert _forbids_sampling_params(m) is False, m
 
     def test_fast_mode_omitted_for_unsupported_model(self):

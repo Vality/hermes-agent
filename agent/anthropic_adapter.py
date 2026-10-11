@@ -92,6 +92,24 @@ ADAPTIVE_EFFORT_MAP = {
 # Non-Claude Anthropic-Messages models (minimax, qwen3, GLM, …) are NOT Claude,
 # so they fall through to the legacy path automatically — exactly what those
 # manual-thinking endpoints need.
+#
+# EXCEPTION — MiniMax M3 and M3.1 (Flash Preview) speak the Anthropic
+# *adaptive* thinking contract: ``thinking: {type: "adaptive"}`` paired with
+# ``output_config: {effort: "low|medium|high|xhigh|max"}``. M3.1 additionally
+# REQUIRES adaptive thinking (sending ``type: "enabled"`` or ``type: "disabled"``
+# returns HTTP 400). Per the MiniMax Anthropic-Messages docs, the full set of
+# effort levels is ``low / medium / high / xhigh / max`` with ``max`` as the
+# default when no effort is supplied.
+#
+# Routing M3.1 down the manual path would 400 every request where the user
+# enabled reasoning, so we explicitly recognise the M3 family here. Older
+# MiniMax generations (M2.7, M2.5, M2.1, M2) keep the manual path — they
+# don't advertise adaptive-thinking support. Substring-matched against the
+# model name so date-stamped / suffixed variants (e.g. ``MiniMax-M3.1-Flash-
+# Preview``) match without a code change.
+_MINIMAX_ADAPTIVE_THINKING_MODEL_SUBSTRINGS = (
+    "minimax-m3",  # M3, M3.1, M3.1-Flash-Preview, M3.x future releases
+)
 
 # Older Claude families that DON'T support adaptive thinking (manual thinking
 # with budget_tokens only). Substring-matched against the model name.
@@ -245,12 +263,20 @@ def _supports_adaptive_thinking(model: str) -> bool:
 
     Defaults *unknown* Claude models to adaptive (the modern contract) and
     only returns False for the explicit legacy list of older Claude families
-    that require manual budget-based thinking. Non-Claude Anthropic-Messages
-    models (minimax, qwen3, …) return False so they keep the manual path.
+    that require manual budget-based thinking.
+
+    Non-Claude Anthropic-Messages models normally return False (so they keep
+    the manual path) — EXCEPT for the MiniMax M3 family, which speaks the
+    Anthropic adaptive contract (``thinking: {type: "adaptive"}`` +
+    ``output_config.effort``). See :data:`_MINIMAX_ADAPTIVE_THINKING_MODEL_SUBSTRINGS`.
     """
+    m = (model or "").lower()
+    # MiniMax M3 family: adaptive-thinking Anthropic-Messages contract.
+    # Matches M3, M3.1, M3.1-Flash-Preview, and future M3.x releases.
+    if any(sub in m for sub in _MINIMAX_ADAPTIVE_THINKING_MODEL_SUBSTRINGS):
+        return True
     if not _is_claude_model(model):
         return False
-    m = model.lower()
     return not any(v in m for v in _LEGACY_MANUAL_THINKING_CLAUDE_SUBSTRINGS)
 
 
@@ -2638,16 +2664,22 @@ def build_anthropic_kwargs(
     # silently hides reasoning text that Hermes surfaces in its CLI. We
     # request "summarized" so the reasoning blocks stay populated — matching
     # 4.6 behavior and preserving the activity-feed UX during long tool runs.
+    #
+    # EXCEPTION: third-party Anthropic-Messages endpoints (MiniMax, etc.)
+    # may not implement the `display` extension. MiniMax's published docs
+    # show `thinking: {"type": "adaptive"}` with no `display` field, so we
+    # omit it on third-party hosts to stay within the documented contract.
     _is_kimi_coding = _is_kimi_family_endpoint(base_url, model)
+    _is_third_party = _is_third_party_anthropic_endpoint(base_url)
     if reasoning_config and isinstance(reasoning_config, dict) and not _is_kimi_coding:
         if reasoning_config.get("enabled") is not False and "haiku" not in model.lower():
             effort = str(reasoning_config.get("effort", "medium")).lower()
             budget = THINKING_BUDGET.get(effort, 8000)
             if _supports_adaptive_thinking(model):
-                kwargs["thinking"] = {
-                    "type": "adaptive",
-                    "display": "summarized",
-                }
+                thinking_block: dict = {"type": "adaptive"}
+                if not _is_third_party:
+                    thinking_block["display"] = "summarized"
+                kwargs["thinking"] = thinking_block
                 adaptive_effort = ADAPTIVE_EFFORT_MAP.get(effort, "medium")
                 # Downgrade xhigh→max on models that don't list xhigh as a
                 # supported level (Opus/Sonnet 4.6). Opus 4.7+ keeps xhigh.
