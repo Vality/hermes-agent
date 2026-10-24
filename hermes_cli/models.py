@@ -326,6 +326,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "kimi-k2-0905-preview",
     ],
     "minimax": [
+        "MiniMax-M3.1-Flash",
         "MiniMax-M3",
         "MiniMax-M2.7",
         "MiniMax-M2.5",
@@ -333,11 +334,18 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "MiniMax-M2",
     ],
     "minimax-oauth": [
+        # M3.1 (Flash Preview) — adaptive thinking with tunable effort via
+        # output_config.effort (low/medium/high/xhigh/max). Listed first as
+        # the current flagship. The API also accepts the docs' alias
+        # "MiniMax-M3.1-Flash-Preview", but "MiniMax-M3.1-Flash" is the
+        # canonical id returned by GET /v1/models.
+        "MiniMax-M3.1-Flash",
         "MiniMax-M3",
         "MiniMax-M2.7",
         "MiniMax-M2.7-highspeed",
     ],
     "minimax-cn": [
+        "MiniMax-M3.1-Flash",
         "MiniMax-M3",
         "MiniMax-M2.7",
         "MiniMax-M2.5",
